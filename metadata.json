@@ -1,0 +1,10 @@
+{
+  "name": "PharmaCare Nurse",
+  "description": "Aplicativo hospitalar de controle de estoque, leitura por IA/OCR de rótulos de medicamentos, alertas de validade e baixa rápida para caixas de pacientes.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
