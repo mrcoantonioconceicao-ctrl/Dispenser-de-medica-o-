@@ -10,7 +10,9 @@ import {
   Building2,
   Info,
   CheckCircle2,
-  Download
+  Download,
+  CloudOff,
+  Clock
 } from 'lucide-react';
 import { LoteEstoque, Medicamento } from '../types';
 import { getExpiryBadgeInfo, getExpiryTier, formatDatePtBr } from '../utils/pharmacyUtils';
@@ -159,6 +161,12 @@ export const StockManagement: React.FC<StockManagementProps> = ({
                         MAV
                       </span>
                     )}
+                    {(med.pendingSync || medLots.some(l => l.pendingSync)) && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/40 flex items-center gap-1" title="Alteração mantida offline na Fila de Sincronização">
+                        <CloudOff className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                        Pendente
+                      </span>
+                    )}
                     <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                       {med.categoria}
                     </span>
@@ -213,7 +221,12 @@ export const StockManagement: React.FC<StockManagementProps> = ({
                           className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col justify-between space-y-2"
                         >
                           <div className="flex items-center justify-between text-xs">
-                            <span className="font-mono font-bold text-slate-900 dark:text-white">Lote: {lote.lote}</span>
+                            <span className="font-mono font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                              Lote: {lote.lote}
+                              {lote.pendingSync && (
+                                <CloudOff className="w-3 h-3 text-amber-500" title="Lote cadastrado offline (Pendente de sincronização)" />
+                              )}
+                            </span>
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${badge.colorClass}`}>
                               {formatDatePtBr(lote.dataValidade)}
                             </span>

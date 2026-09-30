@@ -10,7 +10,8 @@ import {
   Building2,
   Clock,
   ArrowDownRight,
-  Download
+  Download,
+  CloudOff
 } from 'lucide-react';
 import { MovimentacaoDispensacao, Medicamento, LoteEstoque } from '../types';
 
@@ -124,6 +125,12 @@ export const DispensationHistory: React.FC<DispensationHistoryProps> = ({
                     {med?.altaVigilancia && (
                       <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-500/20 text-amber-700 dark:text-amber-300 font-extrabold">
                         MAV
+                      </span>
+                    )}
+                    {disp.pendingSync && (
+                      <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-300 text-[10px] font-bold flex items-center gap-1" title="Dispensação registrada offline no Sync Queue">
+                        <CloudOff className="w-3 h-3 text-amber-500" />
+                        Pendente
                       </span>
                     )}
                   </div>

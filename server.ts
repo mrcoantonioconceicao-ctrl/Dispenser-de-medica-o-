@@ -1,10 +1,19 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const STORE_FILE = path.join(DATA_DIR, "pharma_store.json");
+
+// Ensure data directory exists for permanent file storage
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
 
 async function startServer() {
   const app = express();
@@ -14,7 +23,48 @@ async function startServer() {
 
   // Health check endpoint
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", app: "PharmaCare Nurse API", timestamp: new Date().toISOString() });
+    const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY");
+    res.json({ 
+      status: "ok", 
+      app: "PharmaCare Nurse API", 
+      aiServiceConfigured: hasGeminiKey,
+      timestamp: new Date().toISOString() 
+    });
+  });
+
+  // GET /api/store - Retrieve server-persisted database
+  app.get("/api/store", async (_req, res) => {
+    try {
+      if (fs.existsSync(STORE_FILE)) {
+        const fileContent = await fs.promises.readFile(STORE_FILE, "utf-8");
+        const data = JSON.parse(fileContent);
+        return res.json({ success: true, data });
+      }
+      return res.json({ success: true, data: null });
+    } catch (err: any) {
+      console.error("[Store API GET] Erro ao ler banco de dados do servidor:", err);
+      return res.status(500).json({ error: "Falha ao carregar banco de dados do servidor" });
+    }
+  });
+
+  // POST /api/store - Save persistent state to server disk
+  app.post("/api/store", async (req, res) => {
+    try {
+      const payload = req.body;
+      if (!payload || typeof payload !== "object") {
+        return res.status(400).json({ error: "Dados inválidos para salvamento" });
+      }
+
+      await fs.promises.writeFile(STORE_FILE, JSON.stringify(payload, null, 2), "utf-8");
+      return res.json({
+        success: true,
+        message: "Dados do estoque salvos permanentemente no servidor!",
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      console.error("[Store API POST] Erro ao salvar banco de dados do servidor:", err);
+      return res.status(500).json({ error: "Falha ao salvar dados no disco do servidor" });
+    }
   });
 
   // OCR + LLM Scan Endpoint for Medicine Packaging
@@ -182,7 +232,9 @@ Extraia com máxima precisão os seguintes campos em JSON:
   }
 
   app.listen(PORT, "0.0.0.0", () => {
+    const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY");
     console.log(`[PharmaCare Server] Rodando na porta ${PORT}`);
+    console.log(`[PharmaCare Server] API Key Gemini: ${hasKey ? "CONFIGURADA (Serviço de IA Ativo)" : "NÃO CONFIGURADA (Modo de Demonstração/Simulado Ativo)"}`);
   });
 }
 

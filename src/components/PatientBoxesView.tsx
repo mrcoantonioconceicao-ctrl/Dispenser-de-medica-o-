@@ -10,7 +10,8 @@ import {
   Pill,
   UserCheck,
   Building2,
-  FileText
+  FileText,
+  CloudOff
 } from 'lucide-react';
 import { PacienteCaixa, Medicamento, LoteEstoque } from '../types';
 import { formatDatePtBr } from '../utils/pharmacyUtils';
@@ -134,6 +135,12 @@ export const PatientBoxesView: React.FC<PatientBoxesViewProps> = ({
                   <span className="font-mono text-xs font-semibold text-slate-500 dark:text-slate-400">
                     {paciente.prontuario}
                   </span>
+                  {paciente.pendingSync && (
+                    <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-300 text-[10px] font-bold flex items-center gap-1" title="Caixa criada ou alterada offline">
+                      <CloudOff className="w-3 h-3 text-amber-500" />
+                      Pendente
+                    </span>
+                  )}
                 </div>
 
                 <button

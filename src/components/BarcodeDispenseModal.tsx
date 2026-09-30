@@ -12,9 +12,11 @@ import {
   Zap,
   Check,
   Video,
-  Camera
+  Camera,
+  RefreshCw,
+  QrCode
 } from 'lucide-react';
-import { BrowserMultiFormatReader } from '@zxing/browser';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { LoteEstoque, Medicamento, PacienteCaixa, EnfermeiraProfile } from '../types';
 import { getExpiryBadgeInfo, getExpiryTier, formatDatePtBr, playBeepSound, triggerHaptic } from '../utils/pharmacyUtils';
 
@@ -55,11 +57,10 @@ export const BarcodeDispenseModal: React.FC<BarcodeDispenseModalProps> = ({
   const [duplaChecagemConfirmed, setDuplaChecagemConfirmed] = useState<boolean>(false);
   const [manualBarcodeSearch, setManualBarcodeSearch] = useState<string>('');
 
-  // Camera Barcode Scanner state
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  // Camera Barcode Scanner state using html5-qrcode
+  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const [isScanningActive, setIsScanningActive] = useState<boolean>(false);
-  const [cameraStatus, setCameraStatus] = useState<string>('Aponte a câmera para o código de barras');
+  const [cameraStatus, setCameraStatus] = useState<string>('Iniciando leitor de câmera...');
 
   useEffect(() => {
     if (preselectedLoteId) setSelectedLoteId(preselectedLoteId);
@@ -67,53 +68,80 @@ export const BarcodeDispenseModal: React.FC<BarcodeDispenseModalProps> = ({
   }, [preselectedLoteId, preselectedPacienteId]);
 
   useEffect(() => {
+    let timer: NodeJS.Timeout;
     if (isOpen) {
-      startBarcodeScanner();
+      // Delay slightly to ensure DOM element 'html5qr-code-full-region' is mounted
+      timer = setTimeout(() => {
+        startBarcodeScanner();
+      }, 150);
     } else {
       stopBarcodeScanner();
     }
     return () => {
+      clearTimeout(timer);
       stopBarcodeScanner();
     };
   }, [isOpen]);
 
   const startBarcodeScanner = async () => {
     try {
-      const codeReader = new BrowserMultiFormatReader();
-      codeReaderRef.current = codeReader;
+      await stopBarcodeScanner();
 
-      if (videoRef.current) {
-        setIsScanningActive(true);
-        setCameraStatus('Câmera ativa. Buscando código de barras...');
+      const elementId = 'html5qr-code-full-region';
+      const container = document.getElementById(elementId);
+      if (!container) return;
 
-        await codeReader.decodeFromVideoDevice(
-          undefined, // Default environment camera
-          videoRef.current,
-          (result, error) => {
-            if (result) {
-              const barcodeText = result.getText();
-              handleBarcodeScanned(barcodeText);
-            }
-          }
-        );
-      }
-    } catch (err) {
-      console.warn("Câmera indisponível para leitura de código de barras:", err);
-      setCameraStatus("Câmera indisponível. Digite ou selecione o lote abaixo.");
+      const html5QrCode = new Html5Qrcode(elementId);
+      html5QrCodeRef.current = html5QrCode;
+
+      setIsScanningActive(true);
+      setCameraStatus('Aponte a câmera para a etiqueta do paciente ou código do medicamento...');
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 260, height: 160 },
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.DATA_MATRIX,
+          Html5QrcodeSupportedFormats.AZTEC,
+          Html5QrcodeSupportedFormats.ITF
+        ]
+      };
+
+      await html5QrCode.start(
+        { facingMode: 'environment' },
+        config,
+        (decodedText) => {
+          handleBarcodeScanned(decodedText);
+        },
+        () => {
+          // Frame scanner parse errors ignored
+        }
+      );
+    } catch (err: any) {
+      console.warn("Câmera indisponível via html5-qrcode:", err);
+      setCameraStatus("Câmera indisponível. Digite ou selecione manualmente abaixo.");
       setIsScanningActive(false);
     }
   };
 
-  const stopBarcodeScanner = () => {
-    if (codeReaderRef.current) {
-      // BrowserMultiFormatReader does not have a direct reset method in recent versions,
-      // but stopping tracks on video stream cleans up nicely.
-      codeReaderRef.current = null;
-    }
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
+  const stopBarcodeScanner = async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
+        html5QrCodeRef.current.clear();
+      } catch (e) {
+        console.warn("Erro ao parar html5QrCode:", e);
+      }
+      html5QrCodeRef.current = null;
     }
     setIsScanningActive(false);
   };
@@ -121,26 +149,54 @@ export const BarcodeDispenseModal: React.FC<BarcodeDispenseModalProps> = ({
   const handleBarcodeScanned = (barcode: string) => {
     if (!barcode || barcode === scannedBarcode) return;
 
-    setScannedBarcode(barcode);
+    const cleanCode = barcode.trim();
+    setScannedBarcode(cleanCode);
     playBeepSound();
     triggerHaptic();
 
-    // Match lot with this barcode or standard barcode of medicine
-    const matchedMed = medicaments.find(m => m.codigoBarrasPadrao === barcode);
-    if (matchedMed) {
-      const matchedLot = lots.find(l => l.medicamentoId === matchedMed.id && l.quantidadeAtual > 0);
-      if (matchedLot) {
-        setSelectedLoteId(matchedLot.id);
-        setCameraStatus(`Código LIDO: ${barcode} (${matchedMed.nomeComercial})`);
+    // 1. Check if barcode corresponds to a Patient (by prontuario, id, or leito)
+    const matchedPatient = patients.find(p => 
+      p.prontuario?.toLowerCase() === cleanCode.toLowerCase() ||
+      p.id?.toLowerCase() === cleanCode.toLowerCase() ||
+      p.leito?.toLowerCase() === cleanCode.toLowerCase() ||
+      (p.prontuario && cleanCode.toLowerCase().includes(p.prontuario.toLowerCase()))
+    );
+
+    // 2. Check if barcode corresponds to a Medication (by standard barcode or id)
+    const matchedMed = medicaments.find(m => 
+      m.codigoBarrasPadrao === cleanCode || 
+      m.id === cleanCode
+    );
+
+    // 3. Check if barcode corresponds to a Specific Lot
+    const matchedLot = lots.find(l => 
+      l.lote.toLowerCase() === cleanCode.toLowerCase() || 
+      l.id === cleanCode
+    );
+
+    if (matchedPatient) {
+      setSelectedPacienteId(matchedPatient.id);
+      setCameraStatus(`🎯 Paciente identificado: ${matchedPatient.leito} - ${matchedPatient.nomePaciente} (${matchedPatient.prontuario})`);
+    } else if (matchedMed) {
+      const availableLot = lots.find(l => l.medicamentoId === matchedMed.id && l.quantidadeAtual > 0);
+      if (availableLot) {
+        setSelectedLoteId(availableLot.id);
+        setCameraStatus(`💊 Medicamento lido: ${matchedMed.nomeComercial} (${matchedMed.dosagem})`);
+      } else {
+        setCameraStatus(`⚠️ Medicamento lido (${matchedMed.nomeComercial}), mas sem lote disponível em estoque!`);
       }
+    } else if (matchedLot) {
+      const lotMed = medicaments.find(m => m.id === matchedLot.medicamentoId);
+      setSelectedLoteId(matchedLot.id);
+      setCameraStatus(`🏷️ Lote de estoque lido: ${matchedLot.lote} (${lotMed?.nomeComercial || 'Medicamento'})`);
     } else {
-      setCameraStatus(`Código LIDO: ${barcode} (Selecione o lote correspondente)`);
+      setCameraStatus(`🔍 Código Lido: ${cleanCode} (Selecione o lote ou paciente)`);
     }
   };
 
   const handleManualSearch = (code: string) => {
     setManualBarcodeSearch(code);
-    if (code.trim().length >= 4) {
+    if (code.trim().length >= 3) {
       handleBarcodeScanned(code.trim());
     }
   };
@@ -203,7 +259,7 @@ export const BarcodeDispenseModal: React.FC<BarcodeDispenseModalProps> = ({
                 Baixa Automática & Dispensação Rápida
               </h2>
               <p className="text-xs text-indigo-200">
-                Retirada do Estoque para a Caixa do Paciente
+                Leitura de Etiquetas (html5-qrcode) & Retirada de Estoque
               </p>
             </div>
           </div>
@@ -221,34 +277,49 @@ export const BarcodeDispenseModal: React.FC<BarcodeDispenseModalProps> = ({
         {/* Modal Content */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1 text-xs">
           
-          {/* Live Camera Scanner Box */}
+          {/* Live Camera Scanner Box with html5-qrcode */}
           <div className="bg-slate-900 text-slate-100 rounded-2xl p-3 border border-indigo-500/30 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-bold flex items-center gap-1.5 text-indigo-400 text-xs">
-                <Camera className="w-4 h-4 text-indigo-400 animate-pulse" />
-                Leitor de Código de Barras (Câmera Nativa):
+                <QrCode className="w-4 h-4 text-indigo-400 animate-pulse" />
+                Leitor de Etiquetas e Códigos (html5-qrcode):
               </span>
-              <span className="text-[10px] bg-indigo-900/80 text-indigo-200 px-2 py-0.5 rounded font-mono">
-                {scannedBarcode ? `Lido: ${scannedBarcode}` : "Pronto para Leitura"}
-              </span>
+              <div className="flex items-center gap-2">
+                {scannedBarcode && (
+                  <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono font-bold">
+                    Lido: {scannedBarcode}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={startBarcodeScanner}
+                  title="Reiniciar Câmera"
+                  className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
-            {/* Video Feed viewport */}
-            <div className="relative h-28 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden">
-              <video
-                ref={videoRef}
-                playsInline
-                muted
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-0.5 bg-rose-500 shadow-[0_0_12px_#f43f5e] animate-pulse"></div>
+            {/* Video Feed viewport for html5-qrcode */}
+            <div className="relative min-h-[140px] max-h-[200px] bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden [&_video]:w-full [&_video]:h-full [&_video]:object-cover">
+              <div id="html5qr-code-full-region" className="w-full h-full min-h-[140px]"></div>
+              {isScanningActive && (
+                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-0.5 bg-rose-500 shadow-[0_0_12px_#f43f5e] animate-pulse pointer-events-none"></div>
+              )}
+            </div>
+
+            {/* Camera Status Notification Banner */}
+            <div className="text-[11px] text-indigo-200 bg-indigo-950/60 px-3 py-1.5 rounded-lg border border-indigo-800/50 flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="truncate">{cameraStatus}</span>
             </div>
 
             {/* Manual Barcode Input Search */}
             <div className="relative pt-1">
               <input
                 type="text"
-                placeholder="Ou digite o código de barras (EAN) manualmente..."
+                placeholder="Ou digite a etiqueta de paciente (prontuário) ou EAN de medicamento..."
                 value={manualBarcodeSearch}
                 onChange={(e) => handleManualSearch(e.target.value)}
                 className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 font-mono text-[11px] outline-none focus:border-indigo-500"
@@ -341,6 +412,7 @@ export const BarcodeDispenseModal: React.FC<BarcodeDispenseModalProps> = ({
               <div className="p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-[11px] text-indigo-900 dark:text-indigo-200 space-y-1">
                 <div className="flex items-center justify-between font-bold">
                   <span>Diagnóstico: {selectedPaciente.diagnosticoResumido}</span>
+                  <span className="text-slate-500 font-mono text-[10px]">Prontuário: {selectedPaciente.prontuario}</span>
                 </div>
                 {selectedPaciente.alergias.length > 0 && (
                   <div className="text-rose-600 dark:text-rose-400 font-extrabold flex items-center gap-1">
@@ -366,7 +438,7 @@ export const BarcodeDispenseModal: React.FC<BarcodeDispenseModalProps> = ({
               <button
                 type="button"
                 onClick={() => setQuantidadeDispensa(Math.max(1, quantidadeDispensa - 1))}
-                className="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 font-bold text-base flex items-center justify-center border border-slate-300 dark:border-slate-600 cursor-pointer shadow-sm"
+                className="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 font-bold text-base flex items-center justify-center border border-slate-300 dark:border-slate-600 cursor-pointer shadow-sm text-slate-800 dark:text-slate-200"
               >
                 -
               </button>
@@ -376,7 +448,7 @@ export const BarcodeDispenseModal: React.FC<BarcodeDispenseModalProps> = ({
               <button
                 type="button"
                 onClick={() => setQuantidadeDispensa(quantidadeDispensa + 1)}
-                className="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 font-bold text-base flex items-center justify-center border border-slate-300 dark:border-slate-600 cursor-pointer shadow-sm"
+                className="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 font-bold text-base flex items-center justify-center border border-slate-300 dark:border-slate-600 cursor-pointer shadow-sm text-slate-800 dark:text-slate-200"
               >
                 +
               </button>

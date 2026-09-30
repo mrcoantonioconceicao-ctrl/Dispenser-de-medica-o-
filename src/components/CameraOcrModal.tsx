@@ -20,6 +20,7 @@ import {
 import { Medicamento, LoteEstoque, OCRScanResult } from '../types';
 import { OCR_PRESET_SAMPLES } from '../data/initialData';
 import { playBeepSound, triggerHaptic, formatDatePtBr } from '../utils/pharmacyUtils';
+import { compressImage, processImageWithCanvas } from '../utils/imageUtils';
 
 interface CameraOcrModalProps {
   isOpen: boolean;
@@ -40,6 +41,12 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
   const [step, setStep] = useState<'CAPTURE' | 'CONFIRMATION'>('CAPTURE');
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // Compression & Error feedback states
+  const [isCompressing, setIsCompressing] = useState(false);
+  const [compressionStats, setCompressionStats] = useState<{ originalKb: number; compressedKb: number } | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Real Camera WebRTC states
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -106,44 +113,85 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Capture real frame from HTML5 video element
-  const handleCapturePhoto = () => {
+  // Capture real frame from HTML5 video element with client-side compression
+  const handleCapturePhoto = async () => {
+    setApiError(null);
+    setFormError(null);
+
     if (!videoRef.current || !canvasRef.current) {
-      alert("Câmera não inicializada.");
+      setCameraError("Câmera não inicializada. Verifique as permissões do seu navegador.");
       return;
     }
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
 
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      setPreviewImage(dataUrl);
-      processImageWithGemini(dataUrl);
+      setIsCompressing(true);
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const rawDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+
+        // Client-side Image Compression (max 1024px, 0.7 quality) via Canvas to prevent payload limits & timeouts
+        const compressedResult = await compressImage(rawDataUrl, {
+          maxWidth: 1024,
+          quality: 0.7
+        });
+
+        setCompressionStats({
+          originalKb: compressedResult.originalSizeKb,
+          compressedKb: compressedResult.compressedSizeKb
+        });
+        setPreviewImage(compressedResult.dataUrl);
+
+        await processImageWithGemini(compressedResult.dataUrl);
+      } catch (err: any) {
+        console.error("Erro na compressão de imagem:", err);
+        setApiError("Não foi possível otimizar a imagem da câmera. Tente utilizar a opção de upload de arquivo.");
+      } finally {
+        setIsCompressing(false);
+      }
     }
   };
 
-  // Upload real image file from mobile or PC
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload real image file from mobile or PC with client-side compression
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const result = evt.target?.result as string;
-      setPreviewImage(result);
-      processImageWithGemini(result);
-    };
-    reader.readAsDataURL(file);
+    setApiError(null);
+    setFormError(null);
+    setIsCompressing(true);
+
+    try {
+      // Compress the File object captured by the camera / input before sending to Gemini API
+      const compressedResult = await compressImage(file, {
+        maxWidth: 1024,
+        quality: 0.7
+      });
+
+      setCompressionStats({
+        originalKb: compressedResult.originalSizeKb,
+        compressedKb: compressedResult.compressedSizeKb
+      });
+      setPreviewImage(compressedResult.dataUrl);
+
+      await processImageWithGemini(compressedResult.dataUrl);
+    } catch (err: any) {
+      console.error("Erro no processamento do arquivo enviado:", err);
+      setApiError("Erro ao comprimir o arquivo de imagem. Certifique-se de escolher um formato de foto válido (JPG/PNG).");
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
-  // Send real base64 image to server Gemini OCR route
+  // Send real compressed base64 image to server Gemini OCR route with safe error handling
   const processImageWithGemini = async (base64Img: string) => {
     setIsLoadingAi(true);
+    setApiError(null);
     playBeepSound();
     triggerHaptic();
 
@@ -157,6 +205,11 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
         })
       });
 
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.error || `Servidor retornou erro com código HTTP ${response.status}`);
+      }
+
       const resData = await response.json();
 
       if (resData.success && resData.data) {
@@ -168,7 +221,7 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
         const val = d.dataValidade || new Date(Date.now() + 180 * 86400000).toISOString().split('T')[0];
         const numLote = d.lote || `LOTE-${Math.floor(1000 + Math.random() * 9000)}`;
         const barr = d.codigoBarras || `789${Math.floor(1000000000 + Math.random() * 9000000000)}`;
-        const uso = d.paraQueServe || 'Medicamento identificado por OCR de alta precisão.';
+        const uso = d.paraQueServe || 'Medicamento identificado por visão computacional.';
         const cuidados = d.cuidadosEspeciais || 'Verificar via de administração e prescrição do leito.';
         const altaVig = Boolean(d.altaVigilancia);
         const confianca = d.confiancaLeitura || 95;
@@ -190,11 +243,11 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
         // Transition to Confirmation & Quantity Entry Form Step
         setStep('CONFIRMATION');
       } else {
-        alert("Não foi possível extrair dados legíveis da foto. Tente aproximação com boa iluminação.");
+        setApiError(resData.error || "Não foi possível extrair dados legíveis do rótulo. Aproxime a foto com boa iluminação ou preencha os dados manualmente.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro na API Gemini OCR:", err);
-      alert("Erro de conexão ao processar imagem.");
+      setApiError(`Falha de comunicação com a IA: ${err?.message || 'Erro de rede'}. Você pode utilizar a opção de preenchimento manual.`);
     } finally {
       setIsLoadingAi(false);
     }
@@ -202,6 +255,8 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
 
   // Quick preset sample for demonstration if user wants to test sample labels
   const handleSelectPresetSample = (sample: typeof OCR_PRESET_SAMPLES[0]) => {
+    setApiError(null);
+    setFormError(null);
     setNomeComercial(sample.title.split(' ')[0]);
     setPrincipioAtivo(sample.principio);
     setDosagem(sample.dosagem);
@@ -223,9 +278,10 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
 
   const handleFinalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
 
     if (!nomeComercial || !dataValidade || !lote) {
-      alert("Por favor, preencha o Nome do Medicamento, Lote e Data de Validade.");
+      setFormError("Por favor, preencha obrigatoriamente o Nome do Medicamento, Lote e Data de Validade.");
       return;
     }
 
@@ -296,16 +352,80 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
           {/* STEP 1: CAPTURE PHOTO OR MANUAL ENTRY */}
           {step === 'CAPTURE' && (
             <div className="space-y-4">
+
+              {/* API / OCR Error Visual Feedback Banner */}
+              {apiError && (
+                <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/80 border-2 border-red-300 dark:border-red-800 text-red-900 dark:text-red-200 space-y-3 shadow-md animate-fade-in">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1 flex-1">
+                      <strong className="font-bold text-xs text-red-950 dark:text-red-100 block">
+                        Aviso no Processamento da Imagem
+                      </strong>
+                      <p className="text-xs text-red-800 dark:text-red-300 leading-relaxed">
+                        {apiError}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-red-200 dark:border-red-900/60">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setApiError(null);
+                        startCamera();
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Tentar Novamente</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setApiError(null);
+                        stopCamera();
+                        setNomeComercial('');
+                        setPrincipioAtivo('');
+                        setDosagem('');
+                        setFormaFarmaceutica('Comprimido');
+                        setDataValidade(new Date(Date.now() + 180 * 86400000).toISOString().split('T')[0]);
+                        setLote(`LOTE-${Math.floor(1000 + Math.random() * 9000)}`);
+                        setQuantidadeInicial(10);
+                        setStep('CONFIRMATION');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-red-300 dark:border-red-700 text-red-900 dark:text-red-200 font-bold text-xs hover:bg-red-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-red-500" />
+                      <span>Preencher Manualmente</span>
+                    </button>
+                  </div>
+                </div>
+              )}
               
               {/* Camera Stream Viewport */}
               <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-video flex items-center justify-center shadow-inner">
-                {isLoadingAi ? (
+                {isCompressing ? (
+                  <div className="p-6 text-center space-y-3">
+                    <RefreshCw className="w-10 h-10 text-indigo-400 animate-spin mx-auto" />
+                    <h3 className="text-sm font-bold text-white">Comprimindo imagem no dispositivo...</h3>
+                    <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                      Redimensionando para 1024px e otimizando payload para garantir envio instantâneo sem estouro de limite.
+                    </p>
+                  </div>
+                ) : isLoadingAi ? (
                   <div className="p-6 text-center space-y-3">
                     <Sparkles className="w-10 h-10 text-emerald-400 animate-spin mx-auto" />
                     <h3 className="text-sm font-bold text-white">Analisando Embalagem com IA...</h3>
                     <p className="text-xs text-slate-400 max-w-xs mx-auto">
                       Extraindo Nome Comercial, Princípio Ativo, Dosagem, Validade, Lote e MAV...
                     </p>
+                    {compressionStats && (
+                      <span className="inline-block px-2.5 py-1 rounded-full bg-emerald-950 text-emerald-300 font-mono text-[10px] border border-emerald-500/40 font-bold">
+                        ⚡ Otimização do Frontend: {compressionStats.originalKb}KB ➔ {compressionStats.compressedKb}KB (-{Math.round((1 - compressionStats.compressedKb / compressionStats.originalKb) * 100)}%)
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -431,6 +551,14 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
           {/* STEP 2: HUMAN CONFIRMATION & EXACT QUANTITY FORM */}
           {step === 'CONFIRMATION' && (
             <form onSubmit={handleFinalSubmit} className="space-y-4">
+              
+              {/* Form Error Banner */}
+              {formError && (
+                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 flex items-center gap-2.5 animate-shake">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="text-xs font-bold">{formError}</span>
+                </div>
+              )}
               
               {/* High Confidence Auto-Registered Badge */}
               <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100 space-y-2">

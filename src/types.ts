@@ -11,6 +11,7 @@ export interface Medicamento {
   altaVigilancia: boolean; // MAV (Medicamento de Alta Vigilância)
   codigoBarrasPadrao: string;
   categoria: string;
+  pendingSync?: boolean;
 }
 
 export interface LoteEstoque {
@@ -25,6 +26,7 @@ export interface LoteEstoque {
   registradoPor: string;
   fotoUrl?: string;
   confiancaOCR?: number;
+  pendingSync?: boolean;
 }
 
 export interface PacienteCaixa {
@@ -41,6 +43,7 @@ export interface PacienteCaixa {
     horarios: string[];
     quantidadeNaCaixa: number;
   }[];
+  pendingSync?: boolean;
 }
 
 export interface MovimentacaoDispensacao {
@@ -56,6 +59,15 @@ export interface MovimentacaoDispensacao {
   coren: string;
   codigoBarrasUsado: string;
   duplaChecagemOK?: boolean;
+  pendingSync?: boolean;
+}
+
+export interface SyncQueueItem {
+  id: string;
+  type: 'ADD_STOCK' | 'DISPENSE' | 'ALLOCATE_PATIENT' | 'UPDATE_NURSE' | 'GENERIC_SYNC';
+  timestamp: string;
+  description: string;
+  payload?: any;
 }
 
 export interface EnfermeiraProfile {

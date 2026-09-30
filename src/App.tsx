@@ -9,7 +9,7 @@ import { BarcodeDispenseModal } from './components/BarcodeDispenseModal';
 import { TechnicalProposalModal } from './components/TechnicalProposalModal';
 import { NurseProfileModal } from './components/NurseProfileModal';
 import { INITIAL_MEDICAMENTS, INITIAL_LOTS, INITIAL_PATIENTS, INITIAL_DISPENSATIONS, DEFAULT_NURSE } from './data/initialData';
-import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile } from './types';
+import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile, SyncQueueItem } from './types';
 import { playBeepSound, triggerHaptic, getExpiryTier } from './utils/pharmacyUtils';
 import { generateExecutivePDFReport } from './utils/pdfExporter';
 
@@ -99,8 +99,17 @@ export default function App() {
     return saved ? JSON.parse(saved) : DEFAULT_NURSE;
   });
 
-  // Notification Banner toast
+  // Notification Banner toast & Sync Status State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isSyncedWithServer, setIsSyncedWithServer] = useState<boolean>(true);
+
+  // Sync Queue & Network Connection States
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>(() => {
+    const saved = localStorage.getItem('pharma_sync_queue');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   // Sync dark mode class with document body
   useEffect(() => {
@@ -112,31 +121,135 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Save changes to localStorage
+  // Persist sync queue locally
   useEffect(() => {
-    localStorage.setItem('pharma_medicaments', JSON.stringify(medicaments));
-  }, [medicaments]);
-
-  useEffect(() => {
-    localStorage.setItem('pharma_lots', JSON.stringify(lots));
-  }, [lots]);
-
-  useEffect(() => {
-    localStorage.setItem('pharma_patients', JSON.stringify(patients));
-  }, [patients]);
-
-  useEffect(() => {
-    localStorage.setItem('pharma_dispensations', JSON.stringify(dispensations));
-  }, [dispensations]);
-
-  useEffect(() => {
-    localStorage.setItem('pharma_nurse', JSON.stringify(nurse));
-  }, [nurse]);
+    localStorage.setItem('pharma_sync_queue', JSON.stringify(syncQueue));
+  }, [syncQueue]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
+
+  // Process Sync Queue - Pushes pending offline actions to server
+  const processSyncQueue = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+
+    try {
+      const response = await fetch('/api/store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          medicaments: medicaments.map(m => ({ ...m, pendingSync: false })),
+          lots: lots.map(l => ({ ...l, pendingSync: false })),
+          patients: patients.map(p => ({ ...p, pendingSync: false })),
+          dispensations: dispensations.map(d => ({ ...d, pendingSync: false })),
+          nurse
+        })
+      });
+
+      const resData = await response.json();
+      if (resData.success) {
+        setMedicaments(prev => prev.map(m => ({ ...m, pendingSync: false })));
+        setLots(prev => prev.map(l => ({ ...l, pendingSync: false })));
+        setPatients(prev => prev.map(p => ({ ...p, pendingSync: false })));
+        setDispensations(prev => prev.map(d => ({ ...d, pendingSync: false })));
+
+        const pendingCount = syncQueue.length;
+        setSyncQueue([]);
+        localStorage.removeItem('pharma_sync_queue');
+        setIsSyncedWithServer(true);
+
+        showToast(`⚡ Fila de sincronização concluída com sucesso! ${pendingCount > 0 ? `${pendingCount} ação(ões) enviada(s)` : 'Banco atualizado'}.`);
+      }
+    } catch (err) {
+      console.warn('Erro ao processar fila de sincronização:', err);
+      setIsSyncedWithServer(false);
+      showToast('⚠️ Falha ao conectar ao servidor. As ações permanecem na Fila de Sincronização.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Monitor network connection and auto-sync on recovery
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast('📶 Conexão de rede detectada! Sincronizando fila de pendências...');
+      processSyncQueue();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast('📡 Sem conexão de rede. Ações realizadas serão mantidas na Fila de Sincronização (Sync Queue).');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [syncQueue, medicaments, lots, patients, dispensations, nurse]);
+
+  // Load server database on startup to guarantee recovery across sessions/browser clears
+  useEffect(() => {
+    fetch('/api/store')
+      .then(res => res.json())
+      .then(resData => {
+        if (resData.success && resData.data) {
+          const { medicaments: sMeds, lots: sLots, patients: sPts, dispensations: sDisps, nurse: sNurse } = resData.data;
+          if (Array.isArray(sMeds)) setMedicaments(sMeds);
+          if (Array.isArray(sLots)) setLots(sLots);
+          if (Array.isArray(sPts)) setPatients(sPts);
+          if (Array.isArray(sDisps)) setDispensations(sDisps);
+          if (sNurse) setNurse(sNurse);
+          setIsSyncedWithServer(true);
+        }
+      })
+      .catch(err => {
+        console.warn('Servidor offline no carregamento inicial, mantendo dados do LocalStorage:', err);
+      });
+  }, []);
+
+  // Save changes synchronously to LocalStorage AND asynchronously to Server Disk (/api/store)
+  useEffect(() => {
+    // LocalStorage instant backup
+    localStorage.setItem('pharma_medicaments', JSON.stringify(medicaments));
+    localStorage.setItem('pharma_lots', JSON.stringify(lots));
+    localStorage.setItem('pharma_patients', JSON.stringify(patients));
+    localStorage.setItem('pharma_dispensations', JSON.stringify(dispensations));
+    localStorage.setItem('pharma_nurse', JSON.stringify(nurse));
+
+    // Server disk permanent store
+    const timeout = setTimeout(() => {
+      fetch('/api/store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          medicaments,
+          lots,
+          patients,
+          dispensations,
+          nurse
+        })
+      })
+      .then(res => res.json())
+      .then(resData => {
+        if (resData.success) {
+          setIsSyncedWithServer(true);
+        }
+      })
+      .catch(err => {
+        console.warn('Erro ao sincronizar com banco de dados do servidor:', err);
+        setIsSyncedWithServer(false);
+      });
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [medicaments, lots, patients, dispensations, nurse]);
 
   // Open Dispense Modal with specific lote or patient preset
   const handleOpenDispenseForLote = (loteId: string) => {
@@ -159,6 +272,8 @@ export default function App() {
     playBeepSound();
     triggerHaptic();
 
+    const isOfflineAction = !isOnline;
+
     let existingMed = medicaments.find(
       m => m.nomeComercial.toLowerCase() === data.medicamento.nomeComercial.toLowerCase() ||
            m.codigoBarrasPadrao === data.medicamento.codigoBarrasPadrao
@@ -169,7 +284,8 @@ export default function App() {
     if (!existingMed) {
       const newMed: Medicamento = {
         ...data.medicamento,
-        id: `med-${Date.now()}`
+        id: `med-${Date.now()}`,
+        pendingSync: isOfflineAction
       };
       finalMedId = newMed.id;
       setMedicaments(prev => [newMed, ...prev]);
@@ -178,11 +294,24 @@ export default function App() {
     const newLote: LoteEstoque = {
       ...data.lote,
       id: `lote-${Date.now()}`,
-      medicamentoId: finalMedId!
+      medicamentoId: finalMedId!,
+      pendingSync: isOfflineAction
     };
 
     setLots(prev => [newLote, ...prev]);
-    showToast(`✅ Estoque atualizado! Lote "${newLote.lote}" de ${data.medicamento.nomeComercial} adicionado com sucesso.`);
+
+    if (isOfflineAction) {
+      const queueItem: SyncQueueItem = {
+        id: `sync-${Date.now()}`,
+        type: 'ADD_STOCK',
+        timestamp: new Date().toISOString(),
+        description: `Entrada em estoque: ${data.medicamento.nomeComercial} (Lote ${data.lote.lote})`
+      };
+      setSyncQueue(prev => [...prev, queueItem]);
+      showToast(`📱 Cadastrado Offline! O item foi marcado com 'Pendente' e enviado para a Fila de Sincronização.`);
+    } else {
+      showToast(`✅ Estoque atualizado! Lote "${newLote.lote}" de ${data.medicamento.nomeComercial} adicionado com sucesso.`);
+    }
   };
 
   // 2. CONFIRM DISPENSATION TO PATIENT BOX
@@ -199,6 +328,8 @@ export default function App() {
     const targetPatient = patients.find(p => p.id === dispenseData.pacienteId);
 
     if (!targetLote || !targetMed || !targetPatient) return;
+
+    const isOfflineAction = !isOnline;
 
     // Decrement stock quantity
     setLots(prev => prev.map(l => {
@@ -253,11 +384,24 @@ export default function App() {
       enfermeiraResponsavel: nurse.nome,
       coren: nurse.coren,
       codigoBarrasUsado: dispenseData.codigoBarras,
-      duplaChecagemOK: dispenseData.duplaChecagemOK
+      duplaChecagemOK: dispenseData.duplaChecagemOK,
+      pendingSync: isOfflineAction
     };
 
     setDispensations(prev => [newDispensation, ...prev]);
-    showToast(`📦 ${dispenseData.quantidade}x ${targetMed.nomeComercial} colocado na caixa do ${targetPatient.leito} (${targetPatient.nomePaciente}).`);
+
+    if (isOfflineAction) {
+      const queueItem: SyncQueueItem = {
+        id: `sync-${Date.now()}`,
+        type: 'DISPENSE',
+        timestamp: new Date().toISOString(),
+        description: `Dispensação: ${dispenseData.quantidade}x ${targetMed.nomeComercial} para ${targetPatient.leito}`
+      };
+      setSyncQueue(prev => [...prev, queueItem]);
+      showToast(`📱 Dispensado Offline! Registrado com ícone 'Pendente' e mantido no Sync Queue.`);
+    } else {
+      showToast(`📦 ${dispenseData.quantidade}x ${targetMed.nomeComercial} colocado na caixa do ${targetPatient.leito} (${targetPatient.nomePaciente}).`);
+    }
   };
 
   // 3. RECOLHER LOTE VENCIDO PARA QUARENTENA
@@ -277,13 +421,29 @@ export default function App() {
     diagnosticoResumido: string;
     alergias: string[];
   }) => {
+    const isOfflineAction = !isOnline;
+
     const newPatient: PacienteCaixa = {
       ...patientData,
       id: `pac-${Date.now()}`,
-      medicamentosAlocados: []
+      medicamentosAlocados: [],
+      pendingSync: isOfflineAction
     };
+
     setPatients(prev => [newPatient, ...prev]);
-    showToast(`🛏️ Caixa do ${newPatient.leito} (${newPatient.nomePaciente}) cadastrada com sucesso!`);
+
+    if (isOfflineAction) {
+      const queueItem: SyncQueueItem = {
+        id: `sync-${Date.now()}`,
+        type: 'ALLOCATE_PATIENT',
+        timestamp: new Date().toISOString(),
+        description: `Cadastro de Caixa: ${newPatient.leito} (${newPatient.nomePaciente})`
+      };
+      setSyncQueue(prev => [...prev, queueItem]);
+      showToast(`📱 Caixa cadastrada Offline! Marcada como 'Pendente' para sincronização.`);
+    } else {
+      showToast(`🛏️ Caixa do ${newPatient.leito} (${newPatient.nomePaciente}) cadastrada com sucesso!`);
+    }
   };
 
   // 5. RESET / CLEAR DATA FOR PRODUCTION START
@@ -339,6 +499,11 @@ export default function App() {
         onExportExecutivePDF={handleExportExecutivePDF}
         criticalCount={criticalCount}
         expiredCount={expiredCount}
+        isSyncedWithServer={isSyncedWithServer}
+        isOnline={isOnline}
+        pendingQueueCount={syncQueue.length}
+        isSyncing={isSyncing}
+        onManualSync={processSyncQueue}
       />
 
       {/* Floating Toast Notification */}

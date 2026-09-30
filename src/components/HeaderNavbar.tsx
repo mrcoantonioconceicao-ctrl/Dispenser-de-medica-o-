@@ -11,7 +11,11 @@ import {
   Package, 
   Clock, 
   Users,
-  Download
+  Download,
+  Database,
+  CheckCircle2,
+  CloudOff,
+  RefreshCw
 } from 'lucide-react';
 import { EnfermeiraProfile } from '../types';
 
@@ -28,6 +32,11 @@ interface HeaderNavbarProps {
   onExportExecutivePDF: () => void;
   criticalCount?: number;
   expiredCount?: number;
+  isSyncedWithServer?: boolean;
+  isOnline?: boolean;
+  pendingQueueCount?: number;
+  isSyncing?: boolean;
+  onManualSync?: () => void;
 }
 
 export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
@@ -42,14 +51,19 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
   onOpenNurseProfile,
   onExportExecutivePDF,
   criticalCount = 0,
-  expiredCount = 0
+  expiredCount = 0,
+  isSyncedWithServer = true,
+  isOnline = true,
+  pendingQueueCount = 0,
+  isSyncing = false,
+  onManualSync
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
       {/* Top Bar: Nurse & Shift Header */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between border-b border-slate-100 dark:border-slate-800/60 text-xs sm:text-sm">
         <div className="flex items-center space-x-2 text-slate-700 dark:text-slate-300 font-medium">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+          <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-ping'}`}></div>
           <span className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
             <Building2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             {nurse.setor}
@@ -58,6 +72,39 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
           <span className="hidden sm:inline text-slate-500 dark:text-slate-400">
             {nurse.turno}
           </span>
+
+          {/* Sync Queue / Network Connection Status Badge */}
+          {isSyncing ? (
+            <button
+              type="button"
+              onClick={onManualSync}
+              className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 font-bold text-[10px] animate-pulse cursor-pointer"
+              title="Sincronizando fila de pendências com o servidor..."
+            >
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500" />
+              <span>Sincronizando ({pendingQueueCount})...</span>
+            </button>
+          ) : (!isOnline || pendingQueueCount > 0) ? (
+            <button
+              type="button"
+              onClick={onManualSync}
+              className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/40 font-bold text-[10px] hover:bg-amber-500/25 transition-all cursor-pointer shadow-sm"
+              title="Clique para tentar sincronizar agora as ações pendentes com o servidor"
+            >
+              <CloudOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>{!isOnline ? 'Offline' : 'Pendente'} ({pendingQueueCount} {pendingQueueCount === 1 ? 'Ação' : 'Ações'})</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onManualSync}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-bold text-[10px] cursor-pointer"
+              title="Todas as medicações e dispensações estão salvas no banco de dados do servidor"
+            >
+              <Database className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Banco Sincronizado</span>
+            </button>
+          )}
         </div>
 
         <div className="flex items-center space-x-2 sm:space-x-3">

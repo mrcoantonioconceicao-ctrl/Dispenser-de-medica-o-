@@ -12,7 +12,9 @@ import {
   Building2,
   Calendar,
   Sparkles,
-  Download
+  Download,
+  CloudOff,
+  ShieldAlert
 } from 'lucide-react';
 import { LoteEstoque, Medicamento } from '../types';
 import { getExpiryBadgeInfo, getExpiryTier, getDaysUntilExpiration, formatDatePtBr } from '../utils/pharmacyUtils';
@@ -280,6 +282,12 @@ export const ValidityDashboard: React.FC<ValidityDashboardProps> = ({
                     {med.altaVigilancia && (
                       <span className="px-1.5 py-0.5 text-[9px] font-black bg-amber-500/20 text-amber-700 dark:text-amber-300 rounded border border-amber-400/40">
                         MAV
+                      </span>
+                    )}
+                    {lote.pendingSync && (
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 rounded border border-amber-500/40 flex items-center gap-1" title="Cadastro mantido offline no Sync Queue">
+                        <CloudOff className="w-2.5 h-2.5 text-amber-500" />
+                        Pendente
                       </span>
                     )}
                   </div>
