@@ -23,7 +23,8 @@ async function startServer() {
 
   // Health check endpoint
   app.get("/api/health", (_req, res) => {
-    const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "MY_GEMINI_API_KEY");
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_KEY;
+    const hasGeminiKey = Boolean(apiKey && apiKey !== "MY_GEMINI_API_KEY");
     res.json({ 
       status: "ok", 
       app: "PharmaCare Nurse API", 
@@ -75,7 +76,7 @@ async function startServer() {
         return res.status(400).json({ error: "Imagem não fornecida" });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_KEY;
       if (apiKey && apiKey !== "MY_GEMINI_API_KEY") {
         const ai = new GoogleGenAI({
           apiKey: apiKey,
@@ -168,43 +169,14 @@ Extraia com máxima precisão os seguintes campos em JSON:
           }
         }
 
-        console.error("Todas as tentativas no Gemini falharam. Usando resposta fallback segura:", lastError?.message);
-        // Fallback gracefully so the nurse can complete manual entry
-        return res.json({
-          success: true,
-          source: "fallback-human-review",
-          data: {
-            nomeComercial: "Medicamento para Conferência",
-            principioAtivo: "Verificar no rótulo físico",
-            dosagem: "Conforme embalagem",
-            formaFarmaceutica: "Frasco-Ampola",
-            dataValidade: new Date(Date.now() + 180 * 86400000).toISOString().split("T")[0],
-            lote: `LOTE-${Math.floor(1000 + Math.random() * 9000)}`,
-            codigoBarras: `789${Math.floor(1000000000 + Math.random() * 9000000000)}`,
-            paraQueServe: "Serviço de IA temporariamente indisponível. Preencha os dados do rótulo manualmente.",
-            cuidadosEspeciais: "Conferir prescrição médica e validade no frasco antes da administração.",
-            confiancaLeitura: 60,
-            altaVigilancia: false,
-          },
+        console.error("Todas as tentativas no Gemini falharam:", lastError?.message);
+        return res.status(500).json({
+          error: `Falha na API da IA do Gemini: ${lastError?.message || 'Não foi possível extrair os dados da embalagem com visão computacional.'}`
         });
       } else {
-        // Standard fallback for development/testing if API Key is placeholder
-        return res.json({
-          success: true,
-          source: "simulated-ocr",
-          data: {
-            nomeComercial: "Ceftriaxona Sódica",
-            principioAtivo: "Ceftriaxona Sódica",
-            dosagem: "1g Injetável",
-            formaFarmaceutica: "Frasco-Ampola",
-            dataValidade: "2026-11-30",
-            lote: "L-883492X",
-            codigoBarras: "7891058011234",
-            paraQueServe: "Antibiótico cefalosporina de 3ª geração. Indicado no tratamento de infecções bacterianas graves (respiratórias, renais e sepse).",
-            cuidadosEspeciais: "Medicamento sujeito a prescrição restrita. Reconstituir com Água para Injetáveis. Administrar via IV lenta (2-4 min) ou IM.",
-            confiancaLeitura: 96,
-            altaVigilancia: false
-          }
+        return res.status(400).json({
+          error: "Chave da API do Gemini não configurada no servidor (GEMINI_API_KEY / VITE_GEMINI_API_KEY). Configure a chave nas variáveis de ambiente do painel de deploy.",
+          code: "MISSING_GEMINI_API_KEY"
         });
       }
     } catch (err: any) {

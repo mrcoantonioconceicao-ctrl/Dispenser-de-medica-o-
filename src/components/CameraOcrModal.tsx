@@ -18,7 +18,6 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { Medicamento, LoteEstoque, OCRScanResult } from '../types';
-import { OCR_PRESET_SAMPLES } from '../data/initialData';
 import { playBeepSound, triggerHaptic, formatDatePtBr } from '../utils/pharmacyUtils';
 import { compressImage, processImageWithCanvas } from '../utils/imageUtils';
 
@@ -85,19 +84,34 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
 
   const startCamera = async () => {
     setCameraError(null);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError("Navegador não suporta acesso direto à câmera por vídeo em tempo real. Utilize a opção 'Carregar Arquivo de Foto'.");
+      setIsCameraActive(false);
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false
-      });
-      if (videoRef.current) {
+      let stream: MediaStream | null = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+      }
+
+      if (videoRef.current && stream) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        await videoRef.current.play().catch(e => console.warn("Auto-play error:", e));
         setIsCameraActive(true);
       }
     } catch (err: any) {
       console.warn("Câmera não acessível ou sem permissão:", err);
-      setCameraError("Não foi possível acessar a câmera do dispositivo. Utilize a opção de upload de foto.");
+      setCameraError("Acesso à câmera negado ou indisponível. Utilize o botão 'Carregar Arquivo de Foto' para capturar ou selecionar uma foto.");
       setIsCameraActive(false);
     }
   };
@@ -251,29 +265,6 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
     } finally {
       setIsLoadingAi(false);
     }
-  };
-
-  // Quick preset sample for demonstration if user wants to test sample labels
-  const handleSelectPresetSample = (sample: typeof OCR_PRESET_SAMPLES[0]) => {
-    setApiError(null);
-    setFormError(null);
-    setNomeComercial(sample.title.split(' ')[0]);
-    setPrincipioAtivo(sample.principio);
-    setDosagem(sample.dosagem);
-    setFormaFarmaceutica('Frasco-Ampola');
-    setDataValidade(sample.validade);
-    setLote(sample.lote);
-    setCodigoBarras(sample.barras);
-    setParaQueServe(`Medicamento para tratamento clínico sob acompanhamento.`);
-    setCuidadosEspeciais(sample.cuidados);
-    setAltaVigilancia(sample.altaVigilancia);
-    setConfiancaLeitura(98);
-    setCategoria(sample.altaVigilancia ? 'Alta Vigilância (MAV)' : 'Antibiótico / Geral');
-    setPreviewImage(`data:image/svg+xml;utf8,${encodeURIComponent(sample.imageSvg)}`);
-
-    playBeepSound();
-    triggerHaptic();
-    setStep('CONFIRMATION');
   };
 
   const handleFinalSubmit = (e: React.FormEvent) => {
@@ -519,30 +510,6 @@ export const CameraOcrModal: React.FC<CameraOcrModalProps> = ({
                   <FileText className="w-4 h-4 text-emerald-500" />
                   <span>Ou Digitar Dados Manualmente (Sem Foto)</span>
                 </button>
-              </div>
-
-              {/* Quick Sample Presets for Testing */}
-              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
-                <span className="text-[11px] text-slate-500 font-bold block">
-                  Ou teste com rótulos de amostra pré-carregados:
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {OCR_PRESET_SAMPLES.map((sample, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => handleSelectPresetSample(sample)}
-                      className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-left hover:border-emerald-500 transition-all cursor-pointer space-y-1"
-                    >
-                      <strong className="text-slate-900 dark:text-white block text-xs truncate">
-                        {sample.title}
-                      </strong>
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono block">
-                        Lote: {sample.lote} • Val: {sample.validade}
-                      </span>
-                    </button>
-                  ))}
-                </div>
               </div>
 
             </div>
