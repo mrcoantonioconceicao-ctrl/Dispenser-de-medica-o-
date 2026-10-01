@@ -34,11 +34,15 @@ export default async function handler(req: any, res: any) {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_KEY;
 
     if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+      console.error("[Vercel API scan-medicine] ❌ Chave GEMINI_API_KEY ausente ou não configurada nas variáveis de ambiente.");
       return res.status(400).json({
         error: "Chave da API do Gemini não configurada na Vercel (GEMINI_API_KEY / VITE_GEMINI_API_KEY). Por favor, configure a chave nas variáveis de ambiente no painel de deploy.",
         code: "MISSING_GEMINI_API_KEY"
       });
     }
+
+    const maskedKey = apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4);
+    console.log(`[Vercel API scan-medicine] 🚀 Requisição de OCR recebida. Chave de API ativada: (${maskedKey})`);
 
     const ai = new GoogleGenAI({
       apiKey: apiKey,
@@ -117,8 +121,43 @@ Extraia com máxima precisão os seguintes campos em JSON:
           });
 
           if (response && response.text) {
-            const extractedData = JSON.parse(response.text);
-            return res.status(200).json({ success: true, data: extractedData, source: modelName });
+            const parsed = JSON.parse(response.text);
+            
+            // Mapeamento normalizado garantindo compatibilidade com chaves em Inglês e Português
+            const normalizedData = {
+              // Chaves em Português
+              nomeComercial: parsed.nomeComercial || parsed.name || '',
+              principioAtivo: parsed.principioAtivo || '',
+              dosagem: parsed.dosagem || parsed.dosage || '',
+              formaFarmaceutica: parsed.formaFarmaceutica || '',
+              dataValidade: parsed.dataValidade || parsed.expirationDate || '',
+              lote: parsed.lote || parsed.batchNumber || '',
+              codigoBarras: parsed.codigoBarras || parsed.barcode || '',
+              paraQueServe: parsed.paraQueServe || parsed.indications || '',
+              cuidadosEspeciais: parsed.cuidadosEspeciais || parsed.nursingCare || '',
+              altaVigilancia: Boolean(parsed.altaVigilancia ?? parsed.isMAV ?? false),
+              confiancaLeitura: parsed.confiancaLeitura ?? 95,
+
+              // Chaves em Inglês (Atende à especificação da Vercel Serverless Function)
+              name: parsed.nomeComercial || parsed.name || '',
+              dosage: parsed.dosagem || parsed.dosage || '',
+              batchNumber: parsed.lote || parsed.batchNumber || '',
+              expirationDate: parsed.dataValidade || parsed.expirationDate || '',
+              barcode: parsed.codigoBarras || parsed.barcode || '',
+              isMAV: Boolean(parsed.altaVigilancia ?? parsed.isMAV ?? false),
+              nursingCare: parsed.cuidadosEspeciais || parsed.nursingCare || '',
+              indications: parsed.paraQueServe || parsed.indications || ''
+            };
+
+            console.log(`[Vercel API scan-medicine] ✅ Sucesso no OCR via ${modelName}:`, normalizedData.nomeComercial);
+
+            return res.status(200).json({ 
+              success: true, 
+              data: normalizedData, 
+              // Também disponibiliza o objeto nos níveis raíz para integrações diretas
+              ...normalizedData,
+              source: modelName 
+            });
           }
         } catch (err: any) {
           lastError = err;

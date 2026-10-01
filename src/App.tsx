@@ -4,12 +4,13 @@ import { ValidityDashboard } from './components/ValidityDashboard';
 import { StockManagement } from './components/StockManagement';
 import { PatientBoxesView } from './components/PatientBoxesView';
 import { DispensationHistory } from './components/DispensationHistory';
+import { DailyAdministrationTracker } from './components/DailyAdministrationTracker';
 import { CameraOcrModal } from './components/CameraOcrModal';
 import { BarcodeDispenseModal } from './components/BarcodeDispenseModal';
 import { TechnicalProposalModal } from './components/TechnicalProposalModal';
 import { NurseProfileModal } from './components/NurseProfileModal';
 import { INITIAL_MEDICAMENTS, INITIAL_LOTS, INITIAL_PATIENTS, INITIAL_DISPENSATIONS, DEFAULT_NURSE } from './data/initialData';
-import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile, SyncQueueItem } from './types';
+import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile, SyncQueueItem, DoseAprazada } from './types';
 import { playBeepSound, triggerHaptic, getExpiryTier } from './utils/pharmacyUtils';
 import { generateExecutivePDFReport } from './utils/pdfExporter';
 
@@ -20,7 +21,7 @@ export default function App() {
   });
 
   // Active navigation tab
-  const [activeTab, setActiveTab] = useState<'VALIDITY' | 'STOCK' | 'PATIENTS' | 'HISTORY'>('VALIDITY');
+  const [activeTab, setActiveTab] = useState<'VALIDITY' | 'STOCK' | 'PATIENTS' | 'ADMINISTRATION' | 'HISTORY'>('VALIDITY');
 
   // Modals state
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
@@ -99,6 +100,17 @@ export default function App() {
     return saved ? JSON.parse(saved) : DEFAULT_NURSE;
   });
 
+  // Daily Bedside Administration Schedules
+  const [schedules, setSchedules] = useState<DoseAprazada[]>(() => {
+    const saved = localStorage.getItem('pharma_schedules');
+    if (!saved) return [];
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return [];
+    }
+  });
+
   // Notification Banner toast & Sync Status State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSyncedWithServer, setIsSyncedWithServer] = useState<boolean>(true);
@@ -145,6 +157,7 @@ export default function App() {
           lots: lots.map(l => ({ ...l, pendingSync: false })),
           patients: patients.map(p => ({ ...p, pendingSync: false })),
           dispensations: dispensations.map(d => ({ ...d, pendingSync: false })),
+          schedules: schedules.map(s => ({ ...s, pendingSync: false })),
           nurse
         })
       });
@@ -155,6 +168,7 @@ export default function App() {
         setLots(prev => prev.map(l => ({ ...l, pendingSync: false })));
         setPatients(prev => prev.map(p => ({ ...p, pendingSync: false })));
         setDispensations(prev => prev.map(d => ({ ...d, pendingSync: false })));
+        setSchedules(prev => prev.map(s => ({ ...s, pendingSync: false })));
 
         const pendingCount = syncQueue.length;
         setSyncQueue([]);
@@ -200,11 +214,12 @@ export default function App() {
       .then(res => res.json())
       .then(resData => {
         if (resData.success && resData.data) {
-          const { medicaments: sMeds, lots: sLots, patients: sPts, dispensations: sDisps, nurse: sNurse } = resData.data;
+          const { medicaments: sMeds, lots: sLots, patients: sPts, dispensations: sDisps, schedules: sSchs, nurse: sNurse } = resData.data;
           if (Array.isArray(sMeds)) setMedicaments(sMeds);
           if (Array.isArray(sLots)) setLots(sLots);
           if (Array.isArray(sPts)) setPatients(sPts);
           if (Array.isArray(sDisps)) setDispensations(sDisps);
+          if (Array.isArray(sSchs)) setSchedules(sSchs);
           if (sNurse) setNurse(sNurse);
           setIsSyncedWithServer(true);
         }
@@ -221,6 +236,7 @@ export default function App() {
     localStorage.setItem('pharma_lots', JSON.stringify(lots));
     localStorage.setItem('pharma_patients', JSON.stringify(patients));
     localStorage.setItem('pharma_dispensations', JSON.stringify(dispensations));
+    localStorage.setItem('pharma_schedules', JSON.stringify(schedules));
     localStorage.setItem('pharma_nurse', JSON.stringify(nurse));
 
     // Server disk permanent store
@@ -233,6 +249,7 @@ export default function App() {
           lots,
           patients,
           dispensations,
+          schedules,
           nurse
         })
       })
@@ -249,7 +266,7 @@ export default function App() {
     }, 300);
 
     return () => clearTimeout(timeout);
-  }, [medicaments, lots, patients, dispensations, nurse]);
+  }, [medicaments, lots, patients, dispensations, schedules, nurse]);
 
   // Open Dispense Modal with specific lote or patient preset
   const handleOpenDispenseForLote = (loteId: string) => {
@@ -446,27 +463,140 @@ export default function App() {
     }
   };
 
-  // 5. RESET / CLEAR DATA FOR PRODUCTION START
+  // 5. BED SIDE ADMINISTRATION HANDLERS
+  const handleAdministerDose = (doseId: string, logData: {
+    enfermeiraAplicadora: string;
+    corenAplicadora: string;
+    testemunhaDuplaChecagem?: string;
+    corenTestemunha?: string;
+    observacoes?: string;
+  }) => {
+    const isOfflineAction = !isOnline;
+
+    setSchedules(prev => prev.map(dose => {
+      if (dose.id === doseId) {
+        return {
+          ...dose,
+          status: 'ADMINISTERED',
+          administradoEm: new Date().toISOString(),
+          enfermeiraAplicadora: logData.enfermeiraAplicadora,
+          corenAplicadora: logData.corenAplicadora,
+          testemunhaDuplaChecagem: logData.testemunhaDuplaChecagem,
+          corenTestemunha: logData.corenTestemunha,
+          observacoes: logData.observacoes,
+          pendingSync: isOfflineAction
+        };
+      }
+      return dose;
+    }));
+
+    if (isOfflineAction) {
+      const queueItem: SyncQueueItem = {
+        id: `sync-${Date.now()}`,
+        type: 'ADMINISTER_DOSE',
+        timestamp: new Date().toISOString(),
+        description: `Aplicação no Leito registrada offline.`
+      };
+      setSyncQueue(prev => [...prev, queueItem]);
+      showToast('📱 Aplicação gravada offline no Sync Queue.');
+    } else {
+      showToast('✅ Aplicação confirmada no leito com carimbo de auditoria.');
+    }
+  };
+
+  const handleCancelDose = (doseId: string, reason: string) => {
+    setSchedules(prev => prev.map(dose => {
+      if (dose.id === doseId) {
+        return {
+          ...dose,
+          status: 'CANCELLED',
+          observacoes: reason
+        };
+      }
+      return dose;
+    }));
+    showToast(`❌ Dose registrada como não administrada: ${reason}`);
+  };
+
+  const handleAddSchedule = (newDose: Omit<DoseAprazada, 'id' | 'status'>) => {
+    const created: DoseAprazada = {
+      ...newDose,
+      id: `dose-${Date.now()}`,
+      status: 'PENDING',
+      pendingSync: !isOnline
+    };
+    setSchedules(prev => [created, ...prev]);
+    showToast(`🕒 Aprazamento adicionado: ${created.nomeMedicamento} às ${created.horarioPrevisto}.`);
+  };
+
+  const handleAutoGenerateSchedules = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const generated: DoseAprazada[] = [];
+
+    patients.forEach(paciente => {
+      paciente.medicamentosAlocados.forEach(aloc => {
+        const med = medicaments.find(m => m.id === aloc.medicamentoId);
+        if (!med) return;
+
+        aloc.horarios.forEach(horario => {
+          const exists = schedules.some(
+            s => s.pacienteId === paciente.id && 
+                 s.medicamentoId === med.id && 
+                 s.horarioPrevisto === horario &&
+                 s.dataPrevista === todayStr
+          );
+
+          if (!exists) {
+            generated.push({
+              id: `dose-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              pacienteId: paciente.id,
+              leito: paciente.leito,
+              nomePaciente: paciente.nomePaciente,
+              medicamentoId: med.id,
+              loteId: aloc.loteId,
+              nomeMedicamento: med.nomeComercial,
+              dosagem: med.dosagem,
+              horarioPrevisto: horario,
+              dataPrevista: todayStr,
+              status: 'PENDING',
+              altaVigilancia: med.altaVigilancia
+            });
+          }
+        });
+      });
+    });
+
+    if (generated.length > 0) {
+      setSchedules(prev => [...generated, ...prev]);
+      showToast(`⚡ ${generated.length} aprazamento(s) gerado(s) para o dia com sucesso!`);
+    } else {
+      showToast(`ℹ️ Todos os aprazamentos das caixas ativas já foram gerados para hoje.`);
+    }
+  };
+
+  // 6. RESET / CLEAR DATA FOR PRODUCTION START
   const handleClearAllData = () => {
     localStorage.removeItem('pharma_medicaments');
     localStorage.removeItem('pharma_lots');
     localStorage.removeItem('pharma_patients');
     localStorage.removeItem('pharma_dispensations');
+    localStorage.removeItem('pharma_schedules');
     localStorage.removeItem('pharma_nurse');
 
     setMedicaments(INITIAL_MEDICAMENTS);
     setLots(INITIAL_LOTS);
     setPatients(INITIAL_PATIENTS);
     setDispensations(INITIAL_DISPENSATIONS);
+    setSchedules([]);
     setNurse(DEFAULT_NURSE);
 
     showToast("🔄 Sistema redefinido para as configurações padrão com sucesso.");
   };
 
-  // 6. EXPORT EXECUTIVE PDF REPORT
+  // 7. EXPORT EXECUTIVE PDF REPORT
   const handleExportExecutivePDF = () => {
     try {
-      generateExecutivePDFReport(medicaments, lots, patients, dispensations, nurse);
+      generateExecutivePDFReport(medicaments, lots, patients, dispensations, nurse, schedules);
       showToast("📄 Relatório Executivo Oficial gerado e baixado com sucesso!");
     } catch (err) {
       console.error("Erro ao gerar PDF:", err);
@@ -477,6 +607,7 @@ export default function App() {
   // Counts for alerts
   const expiredCount = lots.filter(l => getExpiryTier(l.dataValidade) === 'EXPIRED').length;
   const criticalCount = lots.filter(l => getExpiryTier(l.dataValidade) === 'CRITICAL').length;
+  const pendingDosesCount = schedules.filter(s => s.status === 'PENDING').length;
 
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans transition-colors duration-200 selection:bg-indigo-500 selection:text-white pb-16">
@@ -499,6 +630,7 @@ export default function App() {
         onExportExecutivePDF={handleExportExecutivePDF}
         criticalCount={criticalCount}
         expiredCount={expiredCount}
+        pendingDosesCount={pendingDosesCount}
         isSyncedWithServer={isSyncedWithServer}
         isOnline={isOnline}
         pendingQueueCount={syncQueue.length}
@@ -547,6 +679,20 @@ export default function App() {
             lots={lots}
             onOpenDispenseForPatient={handleOpenDispenseForPatient}
             onAddNewPatientBox={handleAddNewPatientBox}
+          />
+        )}
+
+        {activeTab === 'ADMINISTRATION' && (
+          <DailyAdministrationTracker
+            schedules={schedules}
+            patients={patients}
+            medicaments={medicaments}
+            nurse={nurse}
+            onAdministerDose={handleAdministerDose}
+            onCancelDose={handleCancelDose}
+            onAddSchedule={handleAddSchedule}
+            onAutoGenerateSchedules={handleAutoGenerateSchedules}
+            onExportPDF={handleExportExecutivePDF}
           />
         )}
 

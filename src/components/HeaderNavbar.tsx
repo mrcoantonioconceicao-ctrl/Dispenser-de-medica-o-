@@ -15,7 +15,8 @@ import {
   Database,
   CheckCircle2,
   CloudOff,
-  RefreshCw
+  RefreshCw,
+  Syringe
 } from 'lucide-react';
 import { EnfermeiraProfile } from '../types';
 
@@ -23,8 +24,8 @@ interface HeaderNavbarProps {
   nurse: EnfermeiraProfile;
   darkMode: boolean;
   onToggleDarkMode: () => void;
-  activeTab: 'VALIDITY' | 'STOCK' | 'PATIENTS' | 'HISTORY';
-  setActiveTab: (tab: 'VALIDITY' | 'STOCK' | 'PATIENTS' | 'HISTORY') => void;
+  activeTab: 'VALIDITY' | 'STOCK' | 'PATIENTS' | 'ADMINISTRATION' | 'HISTORY';
+  setActiveTab: (tab: 'VALIDITY' | 'STOCK' | 'PATIENTS' | 'ADMINISTRATION' | 'HISTORY') => void;
   onOpenScanModal: () => void;
   onOpenDispenseModal: () => void;
   onOpenTechProposal: () => void;
@@ -32,6 +33,7 @@ interface HeaderNavbarProps {
   onExportExecutivePDF: () => void;
   criticalCount?: number;
   expiredCount?: number;
+  pendingDosesCount?: number;
   isSyncedWithServer?: boolean;
   isOnline?: boolean;
   pendingQueueCount?: number;
@@ -52,6 +54,7 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
   onExportExecutivePDF,
   criticalCount = 0,
   expiredCount = 0,
+  pendingDosesCount = 0,
   isSyncedWithServer = true,
   isOnline = true,
   pendingQueueCount = 0,
@@ -252,6 +255,23 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>Caixas de Pacientes</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ADMINISTRATION')}
+            className={`py-2.5 px-3 rounded-lg text-xs sm:text-sm font-semibold flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer ${
+              activeTab === 'ADMINISTRATION'
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-b-2 border-emerald-600 dark:border-emerald-400'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+            }`}
+          >
+            <Syringe className="w-4 h-4" />
+            <span>Aprazamento & Leito</span>
+            {pendingDosesCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-teal-600 text-white animate-pulse">
+                {pendingDosesCount}
+              </span>
+            )}
           </button>
 
           <button

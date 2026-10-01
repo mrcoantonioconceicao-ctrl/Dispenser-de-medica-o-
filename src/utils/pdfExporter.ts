@@ -1,13 +1,14 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile } from '../types';
+import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile, DoseAprazada } from '../types';
 
 export function generateExecutivePDFReport(
   medicaments: Medicamento[],
   lots: LoteEstoque[],
   patients: PacienteCaixa[],
   dispensations: MovimentacaoDispensacao[],
-  nurse: EnfermeiraProfile
+  nurse: EnfermeiraProfile,
+  administrationLogs?: DoseAprazada[]
 ) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -26,7 +27,6 @@ export function generateExecutivePDFReport(
 
   const reportId = `REP-EXEC-${Math.floor(100000 + Math.random() * 900000)}`;
 
-  // Page width and margin helpers
   const pageWidth = doc.internal.pageSize.getWidth(); // ~210mm
   const margin = 14;
   let currentY = 14;
@@ -43,17 +43,17 @@ export function generateExecutivePDFReport(
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.text('PHARMACARE NURSE', margin, 16);
+  doc.text('PHARMAGUARD NURSE', margin, 16);
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(16, 185, 129); // emerald-400
-  doc.text('RELATÓRIO EXECUTIVO DE AUDITORIA & GESTÃO DE ESTOQUE DE FARMÁCIA', margin, 23);
+  doc.text('RELATÓRIO EXECUTIVO DE AUDITORIA, ESTOQUE FEFO & APRAZAMENTO DIÁRIO', margin, 23);
 
   doc.setFontSize(8);
   doc.setTextColor(203, 213, 225); // slate-300
   doc.text(`Protocolo Oficial de Auditoria: ${reportId}  |  Emissão: ${formattedDate}`, margin, 30);
-  doc.text(`Sistema de Gestão Sanitária e Rastreabilidade FEFO por Código de Barras e IA`, margin, 35);
+  doc.text(`Sistema de Rastreabilidade, Aprazamento de Leito e Inteligência Artificial`, margin, 35);
 
   currentY = 52;
 
@@ -79,14 +79,13 @@ export function generateExecutivePDFReport(
 
   currentY += 28;
 
-  // KPI Executive Summary Cards Calculation
+  // KPI Calculations
   const totalMedCount = medicaments.length;
   const totalLotsCount = lots.length;
   const totalUnitsInStock = lots.reduce((sum, l) => sum + l.quantidadeAtual, 0);
 
   let expiredCount = 0;
-  let criticalCount = 0; // <= 30 days
-  let warningCount = 0;  // 31-90 days
+  let criticalCount = 0;
   let safeCount = 0;
 
   const today = new Date();
@@ -97,12 +96,12 @@ export function generateExecutivePDFReport(
     const diffDays = Math.ceil((valDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
     if (diffDays < 0) expiredCount++;
     else if (diffDays <= 30) criticalCount++;
-    else if (diffDays <= 90) warningCount++;
     else safeCount++;
   });
 
-  const totalPatients = patients.length;
   const totalDispensations = dispensations.length;
+  const adminLogs = administrationLogs || [];
+  const adminDoneCount = adminLogs.filter(a => a.status === 'ADMINISTERED').length;
 
   // Render Executive KPI Summary Cards (4 Cards Grid)
   doc.setFont('helvetica', 'bold');
@@ -115,8 +114,8 @@ export function generateExecutivePDFReport(
   const cardHeight = 18;
 
   // Card 1: Total Medicamentos & Unidades
-  doc.setFillColor(236, 253, 245); // emerald-50
-  doc.setDrawColor(167, 243, 208); // emerald-200
+  doc.setFillColor(236, 253, 245);
+  doc.setDrawColor(167, 243, 208);
   doc.roundedRect(margin, currentY, cardWidth, cardHeight, 2, 2, 'FD');
   doc.setFontSize(7);
   doc.setTextColor(4, 120, 87);
@@ -126,7 +125,7 @@ export function generateExecutivePDFReport(
   doc.text(`${totalMedCount} med. / ${totalUnitsInStock} un.`, margin + 3, currentY + 12);
 
   // Card 2: Lotes & Validades
-  doc.setFillColor(239, 246, 255); // blue-50
+  doc.setFillColor(239, 246, 255);
   doc.setDrawColor(191, 219, 254);
   doc.roundedRect(margin + cardWidth + 3, currentY, cardWidth, cardHeight, 2, 2, 'FD');
   doc.setFontSize(7);
@@ -150,17 +149,17 @@ export function generateExecutivePDFReport(
   doc.setFont('helvetica', 'bold');
   doc.text(`${expiredCount} venc. | ${criticalCount} crit.`, margin + (cardWidth * 2) + 9, currentY + 12);
 
-  // Card 4: Dispensações Rastreadas
-  doc.setFillColor(245, 243, 255); // purple-50
+  // Card 4: Aprazamentos do Leito
+  doc.setFillColor(245, 243, 255);
   doc.setDrawColor(221, 214, 254);
   doc.roundedRect(margin + (cardWidth * 3) + 9, currentY, cardWidth, cardHeight, 2, 2, 'FD');
   doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(109, 40, 217);
-  doc.text('DISPENSAÇÕES FEFO', margin + (cardWidth * 3) + 12, currentY + 5);
+  doc.text('APLICAÇÕES NO LEITO', margin + (cardWidth * 3) + 12, currentY + 5);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text(`${totalDispensations} saídas`, margin + (cardWidth * 3) + 12, currentY + 12);
+  doc.text(`${adminDoneCount} / ${adminLogs.length} aplicadas`, margin + (cardWidth * 3) + 12, currentY + 12);
 
   currentY += cardHeight + 10;
 
@@ -168,7 +167,7 @@ export function generateExecutivePDFReport(
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text('1. AUDITORIA DE LOTES EM ESTOQUE E TERMÔMETRO DE VALIDADES', margin, currentY);
+  doc.text('1. AUDITORIA DE LOTES EM ESTOQUE E TERMÔMETRO DE VALIDADES (FEFO)', margin, currentY);
   currentY += 4;
 
   const lotTableData = lots.map(lote => {
@@ -181,16 +180,14 @@ export function generateExecutivePDFReport(
     else if (diffDays <= 30) statusText = `CRÍTICO (${diffDays}d)`;
     else if (diffDays <= 90) statusText = `ALERTA (${diffDays}d)`;
 
-    const formattedVal = valDate.toLocaleDateString('pt-BR');
-
     return [
-      med ? `${med.nomeComercial}${med.altaVigilancia ? ' [MAV]' : ''}` : 'Medicamento Desconhecido',
+      med ? `${med.nomeComercial}${med.altaVigilancia ? ' [MAV]' : ''}` : 'Medicamento',
       med ? med.principioAtivo : '-',
       med ? med.dosagem : '-',
       lote.lote,
-      formattedVal,
+      valDate.toLocaleDateString('pt-BR'),
       `${lote.quantidadeAtual} un`,
-      lote.localizacaoPrateleira || 'Prateleira A1',
+      lote.localizacaoPrateleira || 'A1',
       statusText
     ];
   });
@@ -211,8 +208,7 @@ export function generateExecutivePDFReport(
         fillColor: [15, 23, 42],
         textColor: [255, 255, 255],
         fontSize: 7.5,
-        fontStyle: 'bold',
-        halign: 'left'
+        fontStyle: 'bold'
       },
       bodyStyles: {
         fontSize: 7,
@@ -225,73 +221,68 @@ export function generateExecutivePDFReport(
         if (data.section === 'body' && data.column.index === 7) {
           const text = String(data.cell.raw);
           if (text.includes('VENCIDO')) {
-            data.cell.styles.textColor = [225, 29, 72]; // rose-600
+            data.cell.styles.textColor = [225, 29, 72];
             data.cell.styles.fontStyle = 'bold';
           } else if (text.includes('CRÍTICO')) {
-            data.cell.styles.textColor = [217, 119, 6]; // amber-600
+            data.cell.styles.textColor = [217, 119, 6];
             data.cell.styles.fontStyle = 'bold';
-          } else if (text.includes('ALERTA')) {
-            data.cell.styles.textColor = [180, 83, 9];
           } else {
-            data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+            data.cell.styles.textColor = [5, 150, 105];
           }
         }
       },
       margin: { left: margin, right: margin }
     });
 
-    // Get final Y after table
     currentY = (doc as any).lastAutoTable.finalY + 10;
   }
 
-  // Check page break for Section 2
-  if (currentY > 230) {
+  // Section 2: Daily Bedside Administration Logs
+  if (currentY > 220) {
     doc.addPage();
     currentY = 16;
   }
 
-  // Section 2: Recent Dispensation Log
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text('2. HISTÓRICO DE DISPENSAÇÃO E RASTREABILIDADE PACIENTE-LOTE (FEFO)', margin, currentY);
+  doc.text('2. DIÁRIO DE ADMINISTRAÇÃO, APRAZAMENTO E AUDITORIA NO LEITO', margin, currentY);
   currentY += 4;
 
-  const dispTableData = dispensations.slice(0, 15).map(d => {
-    const med = medicaments.find(m => m.id === d.medicamentoId);
-    const lote = lots.find(l => l.id === d.loteId);
-    const dDate = new Date(d.dataHora).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+  const adminTableData = adminLogs.map(a => {
+    let statusLabel = 'PENDENTE';
+    if (a.status === 'ADMINISTERED') statusLabel = 'APLICADO ✅';
+    else if (a.status === 'CANCELLED') statusLabel = 'CANCELADO ❌';
+
+    const appliedTime = a.administradoEm 
+      ? new Date(a.administradoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      : '-';
 
     return [
-      dDate,
-      med ? med.nomeComercial : 'Medicamento',
-      lote ? lote.lote : '-',
-      `${d.quantidadeDispensada} un`,
-      d.nomePaciente ? `${d.nomePaciente} (${d.leito})` : d.leito,
-      d.enfermeiraResponsavel,
-      d.duplaChecagemOK ? 'Sim (Validado)' : 'Sim'
+      a.horarioPrevisto,
+      `${a.leito} - ${a.nomePaciente}`,
+      `${a.nomeMedicamento} (${a.dosagem})${a.altaVigilancia ? ' [MAV]' : ''}`,
+      statusLabel,
+      appliedTime,
+      a.enfermeiraAplicadora || '-',
+      a.testemunhaDuplaChecagem ? `${a.testemunhaDuplaChecagem} (${a.corenTestemunha})` : '-'
     ];
   });
 
-  if (dispTableData.length === 0) {
+  if (adminTableData.length === 0) {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
     doc.setTextColor(100, 116, 139);
-    doc.text('Nenhuma movimentação de dispensação registrada até o momento.', margin, currentY + 4);
-    currentY += 12;
+    doc.text('Nenhum aprazamento diário registrado.', margin, currentY + 4);
+    currentY += 10;
   } else {
     autoTable(doc, {
       startY: currentY,
-      head: [['Data/Hora', 'Medicamento', 'Lote', 'Qtd', 'Paciente / Leito', 'Resp. Enfermagem', 'Dupla Checagem']],
-      body: dispTableData,
+      head: [['Horário', 'Leito / Paciente', 'Medicamento / Dose', 'Status', 'Hora Aplicação', 'Aplicador / COREN', 'Testemunha MAV']],
+      body: adminTableData,
       theme: 'grid',
       headStyles: {
-        fillColor: [5, 150, 105],
+        fillColor: [13, 148, 136], // teal-600
         textColor: [255, 255, 255],
         fontSize: 7.5,
         fontStyle: 'bold'
@@ -349,15 +340,14 @@ export function generateExecutivePDFReport(
     doc.setPage(i);
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(148, 163, 184); // slate-400
+    doc.setTextColor(148, 163, 184);
     doc.text(
-      `PharmaCare Nurse - Sistema Executivo de Controle FEFO e Rastreabilidade | Documento Autêntico | Página ${i} de ${pageCount}`,
+      `PharmaGuard Nurse - Sistema Executivo de Controle FEFO e Rastreabilidade | Documento Autêntico | Página ${i} de ${pageCount}`,
       margin,
       288
     );
   }
 
-  // Save PDF file with executive naming convention
-  const fileName = `Relatorio_Executivo_Farmacia_${nurse.setor ? nurse.setor.replace(/\s+/g, '_') : 'Posto'}_${now.toISOString().split('T')[0]}.pdf`;
+  const fileName = `Relatorio_Executivo_PharmaGuard_${nurse.setor ? nurse.setor.replace(/\s+/g, '_') : 'Posto'}_${now.toISOString().split('T')[0]}.pdf`;
   doc.save(fileName);
 }
