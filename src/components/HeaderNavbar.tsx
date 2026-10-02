@@ -16,7 +16,8 @@ import {
   CheckCircle2,
   CloudOff,
   RefreshCw,
-  Syringe
+  Syringe,
+  Home
 } from 'lucide-react';
 import { EnfermeiraProfile } from '../types';
 
@@ -24,8 +25,8 @@ interface HeaderNavbarProps {
   nurse: EnfermeiraProfile;
   darkMode: boolean;
   onToggleDarkMode: () => void;
-  activeTab: 'VALIDITY' | 'STOCK' | 'PATIENTS' | 'ADMINISTRATION' | 'HISTORY';
-  setActiveTab: (tab: 'VALIDITY' | 'STOCK' | 'PATIENTS' | 'ADMINISTRATION' | 'HISTORY') => void;
+  activeTab: 'VALIDITY' | 'STOCK' | 'PATIENTS' | 'RESIDENTS' | 'ADMINISTRATION' | 'HISTORY';
+  setActiveTab: (tab: 'VALIDITY' | 'STOCK' | 'PATIENTS' | 'RESIDENTS' | 'ADMINISTRATION' | 'HISTORY') => void;
   onOpenScanModal: () => void;
   onOpenDispenseModal: () => void;
   onOpenTechProposal: () => void;
@@ -255,6 +256,21 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>Caixas de Pacientes</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('RESIDENTS')}
+            className={`py-2.5 px-3 rounded-lg text-xs sm:text-sm font-semibold flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer ${
+              activeTab === 'RESIDENTS'
+                ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-b-2 border-indigo-600 dark:border-indigo-400'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+            }`}
+          >
+            <Home className="w-4 h-4" />
+            <span>Caixas do Residente (ILPI)</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
+              Novo
+            </span>
           </button>
 
           <button

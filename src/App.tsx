@@ -5,12 +5,14 @@ import { StockManagement } from './components/StockManagement';
 import { PatientBoxesView } from './components/PatientBoxesView';
 import { DispensationHistory } from './components/DispensationHistory';
 import { DailyAdministrationTracker } from './components/DailyAdministrationTracker';
+import { ResidentMedicationBoxView } from './components/ResidentMedicationBoxView';
 import { CameraOcrModal } from './components/CameraOcrModal';
 import { BarcodeDispenseModal } from './components/BarcodeDispenseModal';
 import { TechnicalProposalModal } from './components/TechnicalProposalModal';
 import { NurseProfileModal } from './components/NurseProfileModal';
 import { INITIAL_MEDICAMENTS, INITIAL_LOTS, INITIAL_PATIENTS, INITIAL_DISPENSATIONS, DEFAULT_NURSE } from './data/initialData';
-import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile, SyncQueueItem, DoseAprazada } from './types';
+import { DEFAULT_CAREGIVERS, INITIAL_RESIDENT_BOXES } from './data/residentBoxData';
+import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile, SyncQueueItem, DoseAprazada, Caregiver, ResidentMedicationBox } from './types';
 import { playBeepSound, triggerHaptic, getExpiryTier } from './utils/pharmacyUtils';
 import { generateExecutivePDFReport } from './utils/pdfExporter';
 
@@ -21,7 +23,7 @@ export default function App() {
   });
 
   // Active navigation tab
-  const [activeTab, setActiveTab] = useState<'VALIDITY' | 'STOCK' | 'PATIENTS' | 'ADMINISTRATION' | 'HISTORY'>('VALIDITY');
+  const [activeTab, setActiveTab] = useState<'VALIDITY' | 'STOCK' | 'PATIENTS' | 'RESIDENTS' | 'ADMINISTRATION' | 'HISTORY'>('VALIDITY');
 
   // Modals state
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
@@ -32,6 +34,28 @@ export default function App() {
   // Pre-selected IDs for dispense modal
   const [preselectedLoteId, setPreselectedLoteId] = useState<string | undefined>(undefined);
   const [preselectedPacienteId, setPreselectedPacienteId] = useState<string | undefined>(undefined);
+
+  // Preselected resident box ID (from URL parameters or external QR scan)
+  const [selectedResidentBoxId, setSelectedResidentBoxId] = useState<string | undefined>(undefined);
+
+  // Handle URL query parameters on initial app load for direct QR code links
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const boxIdParam = params.get('boxId');
+        const tabParam = params.get('tab');
+        if (boxIdParam) {
+          setActiveTab('RESIDENTS');
+          setSelectedResidentBoxId(boxIdParam);
+        } else if (tabParam === 'RESIDENTS') {
+          setActiveTab('RESIDENTS');
+        }
+      } catch (err) {
+        console.warn('Erro ao processar URL query params:', err);
+      }
+    }
+  }, []);
 
   // Core Data States with LocalStorage fallback (clearing any legacy pre-loaded mock data)
   const [medicaments, setMedicaments] = useState<Medicamento[]>(() => {
@@ -111,6 +135,22 @@ export default function App() {
     }
   });
 
+  // ILPI Module: Caregivers and Resident Medication Boxes
+  const [caregivers, setCaregivers] = useState<Caregiver[]>(() => {
+    const saved = localStorage.getItem('pharma_caregivers');
+    return saved ? JSON.parse(saved) : DEFAULT_CAREGIVERS;
+  });
+
+  const [activeCaregiver, setActiveCaregiver] = useState<Caregiver>(() => {
+    const saved = localStorage.getItem('pharma_active_caregiver');
+    return saved ? JSON.parse(saved) : DEFAULT_CAREGIVERS[0];
+  });
+
+  const [residentBoxes, setResidentBoxes] = useState<ResidentMedicationBox[]>(() => {
+    const saved = localStorage.getItem('pharma_resident_boxes');
+    return saved ? JSON.parse(saved) : INITIAL_RESIDENT_BOXES;
+  });
+
   // Notification Banner toast & Sync Status State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSyncedWithServer, setIsSyncedWithServer] = useState<boolean>(true);
@@ -137,6 +177,19 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('pharma_sync_queue', JSON.stringify(syncQueue));
   }, [syncQueue]);
+
+  // Persist ILPI resident boxes & active caregiver
+  useEffect(() => {
+    localStorage.setItem('pharma_resident_boxes', JSON.stringify(residentBoxes));
+  }, [residentBoxes]);
+
+  useEffect(() => {
+    localStorage.setItem('pharma_caregivers', JSON.stringify(caregivers));
+  }, [caregivers]);
+
+  useEffect(() => {
+    localStorage.setItem('pharma_active_caregiver', JSON.stringify(activeCaregiver));
+  }, [activeCaregiver]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -582,6 +635,9 @@ export default function App() {
     localStorage.removeItem('pharma_dispensations');
     localStorage.removeItem('pharma_schedules');
     localStorage.removeItem('pharma_nurse');
+    localStorage.removeItem('pharma_resident_boxes');
+    localStorage.removeItem('pharma_caregivers');
+    localStorage.removeItem('pharma_active_caregiver');
 
     setMedicaments(INITIAL_MEDICAMENTS);
     setLots(INITIAL_LOTS);
@@ -589,6 +645,9 @@ export default function App() {
     setDispensations(INITIAL_DISPENSATIONS);
     setSchedules([]);
     setNurse(DEFAULT_NURSE);
+    setResidentBoxes(INITIAL_RESIDENT_BOXES);
+    setCaregivers(DEFAULT_CAREGIVERS);
+    setActiveCaregiver(DEFAULT_CAREGIVERS[0]);
 
     showToast("🔄 Sistema redefinido para as configurações padrão com sucesso.");
   };
@@ -596,7 +655,7 @@ export default function App() {
   // 7. EXPORT EXECUTIVE PDF REPORT
   const handleExportExecutivePDF = () => {
     try {
-      generateExecutivePDFReport(medicaments, lots, patients, dispensations, nurse, schedules);
+      generateExecutivePDFReport(medicaments, lots, patients, dispensations, nurse, schedules, residentBoxes);
       showToast("📄 Relatório Executivo Oficial gerado e baixado com sucesso!");
     } catch (err) {
       console.error("Erro ao gerar PDF:", err);
@@ -679,6 +738,18 @@ export default function App() {
             lots={lots}
             onOpenDispenseForPatient={handleOpenDispenseForPatient}
             onAddNewPatientBox={handleAddNewPatientBox}
+          />
+        )}
+
+        {activeTab === 'RESIDENTS' && (
+          <ResidentMedicationBoxView
+            caregivers={caregivers}
+            activeCaregiver={activeCaregiver}
+            onSelectCaregiver={(cg) => setActiveCaregiver(cg)}
+            boxes={residentBoxes}
+            onUpdateBoxes={(updated) => setResidentBoxes(updated)}
+            showToast={showToast}
+            initialBoxId={selectedResidentBoxId}
           />
         )}
 

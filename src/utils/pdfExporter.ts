@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile, DoseAprazada } from '../types';
+import { Medicamento, LoteEstoque, PacienteCaixa, MovimentacaoDispensacao, EnfermeiraProfile, DoseAprazada, ResidentMedicationBox } from '../types';
 
 export function generateExecutivePDFReport(
   medicaments: Medicamento[],
@@ -8,7 +8,8 @@ export function generateExecutivePDFReport(
   patients: PacienteCaixa[],
   dispensations: MovimentacaoDispensacao[],
   nurse: EnfermeiraProfile,
-  administrationLogs?: DoseAprazada[]
+  administrationLogs?: DoseAprazada[],
+  residentBoxes?: ResidentMedicationBox[]
 ) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -298,6 +299,60 @@ export function generateExecutivePDFReport(
     });
 
     currentY = (doc as any).lastAutoTable.finalY + 12;
+  }
+
+  // Section 2B: ILPI Resident Medication Boxes & Physical Stock Balance (If available)
+  if (residentBoxes && residentBoxes.length > 0) {
+    if (currentY > 200) {
+      doc.addPage();
+      currentY = 20;
+    }
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text('CONTROLE DE USO E SALDO - CAIXAS DE MEDICAMENTOS DOS RESIDENTES (ILPI)', margin, currentY);
+    currentY += 4;
+
+    const residentTableData: any[] = [];
+    residentBoxes.forEach(box => {
+      box.medications.forEach(med => {
+        residentTableData.push([
+          box.roomNumber,
+          box.residentName,
+          `${med.name} ${med.presentation}`,
+          med.schedules.join(', ') + 'h',
+          `${med.dailyUsage}x/dia`,
+          med.currentStock,
+          med.specialInstructions || '-'
+        ]);
+      });
+    });
+
+    if (residentTableData.length > 0) {
+      autoTable(doc, {
+        startY: currentY,
+        head: [['Quarto', 'Residente', 'Medicamento / Apresentação', 'Horários', 'Uso Diário', 'Saldo Físico', 'Orientações Especiais']],
+        body: residentTableData,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [79, 70, 229], // indigo-600
+          textColor: [255, 255, 255],
+          fontSize: 7.5,
+          fontStyle: 'bold'
+        },
+        bodyStyles: {
+          fontSize: 7,
+          textColor: [51, 65, 85]
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252]
+        },
+        margin: { left: margin, right: margin }
+      });
+
+      currentY = (doc as any).lastAutoTable.finalY + 12;
+    }
   }
 
   // Check page break for Signatures Block

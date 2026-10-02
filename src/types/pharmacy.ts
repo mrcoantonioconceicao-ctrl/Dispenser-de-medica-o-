@@ -103,6 +103,54 @@ export interface EnfermeiraProfile {
   turno: 'Manhã' | 'Tarde' | 'Noite' | 'Plantão 12h';
 }
 
+// -------------------------------------------------------------
+// MÓDULO ILPI: CONTROLE DE USO E SALDO - CAIXA DO RESIDENTE
+// -------------------------------------------------------------
+export interface Caregiver {
+  id: string;
+  name: string;
+  pinCode: string;
+  role: 'CUIDADOR' | 'COORDENADOR';
+}
+
+export interface ResidentMedicationBox {
+  id: string;
+  residentName: string;
+  roomNumber: string;
+  startDate: string;
+  endDate: string;
+  periodDays: number;
+  lastRestockDate?: string;
+  notes?: string;
+  medications: ResidentMedicationItem[];
+  history: CaregiverAdministrationLog[];
+  pendingSync?: boolean;
+}
+
+export interface ResidentMedicationItem {
+  id: string;
+  name: string;
+  presentation: string; // Ex: "5 mg"
+  schedules: string[];   // Ex: ["08:00", "20:00"]
+  dailyUsage: number;    // Ex: 2
+  periodTotal: number;   // Ex: 10
+  currentStock: number;  // Saldo Físico
+  specialInstructions?: string; // Ex: "Aplicar 2 ampolas a cada 15 dias (IM)"
+}
+
+export interface CaregiverAdministrationLog {
+  id: string;
+  timestamp: string;     // ISO String da aplicação
+  dateFormatted: string; // DD/MM/YYYY
+  timeFormatted: string; // HH:mm
+  medicationName: string;
+  quantityAdministered: number;
+  remainingStock: number;
+  caregiverName: string;
+  scheduleTime?: string; // Horário aprazado (ex: "08:00")
+  notes?: string;
+}
+
 export interface ScanResultAI {
   nomeComercial: string;
   principioAtivo: string;
